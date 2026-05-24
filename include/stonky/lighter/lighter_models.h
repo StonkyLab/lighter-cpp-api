@@ -1,0 +1,65 @@
+/**
+Lighter Data Models
+
+Licensed under the MIT License <http://opensource.org/licenses/MIT>.
+SPDX-License-Identifier: MIT
+Copyright (c) 2026 Vitezslav Kot <vitezslav.kot@stonky.cz>, Stonky s.r.o.
+*/
+
+#ifndef LIGHTER_API_LIGHTER_MODELS_H
+#define LIGHTER_API_LIGHTER_MODELS_H
+
+#include "stonky/lighter/lighter_enums.h"
+#include "stonky/interface/i_json.h"
+#include <nlohmann/json.hpp>
+#include <vector>
+#include <string>
+
+namespace stonky::lighter {
+
+struct Candle final : IJson {
+    std::int64_t openTime{}; // wire: "t"
+    double open{};           // wire: "o"
+    double high{};           // wire: "h"
+    double low{};            // wire: "l"
+    double close{};          // wire: "c"
+    double baseVolume{};     // wire: "v"
+    double quoteVolume{};    // wire: "V"
+
+    [[nodiscard]] nlohmann::json toJson() const override;
+
+    void fromJson(const nlohmann::json& json) override;
+};
+
+struct FundingRate final : IJson {
+    std::int32_t marketId{-1};
+    std::string symbol{};
+    double fundingRate{};
+    std::int64_t fundingTime{}; // only set on historical query; 0 on current snapshot
+    std::string direction{};    // only set on historical query; empty on current snapshot
+
+    [[nodiscard]] nlohmann::json toJson() const override;
+
+    void fromJson(const nlohmann::json& json) override;
+};
+
+struct PerpAsset final : IJson {
+    std::string symbol{};
+    std::int32_t marketId{-1};
+    std::string marketType{};
+    std::string status{};
+    int sizeDecimals{};
+    int priceDecimals{};
+    double takerFee{};
+    double makerFee{};
+    double minBaseAmount{};
+    double minQuoteAmount{};
+    bool isDelisted{false}; // derived: true unless status == "active"
+
+    [[nodiscard]] nlohmann::json toJson() const override;
+
+    void fromJson(const nlohmann::json& json) override;
+};
+} // namespace stonky::lighter
+
+#endif // LIGHTER_API_LIGHTER_MODELS_H

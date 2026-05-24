@@ -1,0 +1,3 @@
+[submodule "stonky-cpp-common"]
+	path = stonky-cpp-common
+	url = git@github.com:StonkyLab/stonky-cpp-common.git
