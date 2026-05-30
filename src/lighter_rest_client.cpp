@@ -11,6 +11,9 @@ Copyright (c) 2026 Vitezslav Kot <vitezslav.kot@stonky.cz>, Stonky s.r.o.
 #include "stonky/lighter/lighter.h"
 #include "stonky/utils/json_utils.h"
 #include <spdlog/spdlog.h>
+#include <chrono>
+#include <mutex>
+#include <thread>
 #include <unordered_map>
 
 namespace stonky::lighter {
@@ -29,6 +32,33 @@ struct RESTClient::P {
     std::shared_ptr<HTTPSession> httpSession;
     std::unordered_map<std::string, std::int32_t> symbolToMarketId;
     bool symbolCachePopulated{false};
+
+    // Optional Lighter read-only auth token. When non-empty it is sent as the
+    // Authorization header on every request, bypassing IP-based rate limits and
+    // applying the L1-address quota for the account's tier.
+    std::string authToken{};
+
+    // Minimum interval between HTTP requests. Default (1000 ms) matches the
+    // Standard tier limit of 60 weighted req/min. Authenticated clients pass a
+    // smaller value derived from their tier (Premium 750 ms, Plus 150 ms,
+    // Builder 75 ms) so the throttle stays just under the documented ceiling.
+    // Exceeding the tier limit returns HTTP 429 wrapped as
+    // {"code":23000,"message":"Too Many Requests!"} and triggers a 60-second
+    // firewall cooldown — far costlier than pacing requests in the first place.
+    // See https://apidocs.lighter.xyz/docs/rate-limits
+    std::chrono::milliseconds minRequestInterval{1000};
+    mutable std::mutex throttleMtx;
+    mutable std::chrono::steady_clock::time_point lastRequestAt{};
+
+    void throttle() const {
+        std::lock_guard<std::mutex> lock(throttleMtx);
+        const auto now = std::chrono::steady_clock::now();
+        const auto elapsed = now - lastRequestAt;
+        if (elapsed < minRequestInterval) {
+            std::this_thread::sleep_for(minRequestInterval - elapsed);
+        }
+        lastRequestAt = std::chrono::steady_clock::now();
+    }
 
     http::response<http::string_body> checkTransport(const http::response<http::string_body>& response) const {
         if (response.result() != http::status::ok) {
@@ -57,7 +87,8 @@ struct RESTClient::P {
     }
 
     std::vector<PerpAsset> loadAssets(bool populateCache) {
-        const auto response = checkTransport(httpSession->get(kOrderBookDetailsPath, nlohmann::json::object()));
+        throttle();
+        const auto response = checkTransport(httpSession->get(kOrderBookDetailsPath, nlohmann::json::object(), authToken));
         const auto json = parseEnvelope(response);
 
         std::vector<PerpAsset> assets;
@@ -102,7 +133,8 @@ struct RESTClient::P {
         q["end_timestamp"] = endSec;
         q["count_back"] = countBack;
 
-        const auto response = checkTransport(httpSession->get(kCandlesPath, q));
+        throttle();
+        const auto response = checkTransport(httpSession->get(kCandlesPath, q, authToken));
         const auto json = parseEnvelope(response);
 
         std::vector<Candle> candles;
@@ -125,7 +157,8 @@ struct RESTClient::P {
         q["end_timestamp"] = endSec;
         q["count_back"] = countBack;
 
-        const auto response = checkTransport(httpSession->get(kFundingsPath, q));
+        throttle();
+        const auto response = checkTransport(httpSession->get(kFundingsPath, q, authToken));
         const auto json = parseEnvelope(response);
 
         std::vector<FundingRate> rates;
@@ -143,6 +176,15 @@ struct RESTClient::P {
 };
 
 RESTClient::RESTClient() : m_p(std::make_unique<P>()) { m_p->httpSession = std::make_shared<HTTPSession>(); }
+
+RESTClient::RESTClient(std::string authToken, std::chrono::milliseconds minRequestInterval)
+    : m_p(std::make_unique<P>()) {
+    m_p->httpSession = std::make_shared<HTTPSession>();
+    m_p->authToken = std::move(authToken);
+    if (minRequestInterval.count() > 0) {
+        m_p->minRequestInterval = minRequestInterval;
+    }
+}
 
 RESTClient::~RESTClient() = default;
 
@@ -261,7 +303,8 @@ std::vector<FundingRate> RESTClient::getFundingRates(const std::int32_t marketId
 }
 
 std::vector<FundingRate> RESTClient::getCurrentFundingRates() const {
-    const auto response = m_p->checkTransport(m_p->httpSession->get(kFundingRatesPath, nlohmann::json::object()));
+    m_p->throttle();
+    const auto response = m_p->checkTransport(m_p->httpSession->get(kFundingRatesPath, nlohmann::json::object(), m_p->authToken));
     const auto json = m_p->parseEnvelope(response);
 
     std::vector<FundingRate> rates;

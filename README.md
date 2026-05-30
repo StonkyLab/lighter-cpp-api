@@ -52,6 +52,68 @@ for (const auto& asset : assets) {
 }
 ```
 
+### Authenticated Client (optional, higher rate limits)
+
+By default `RESTClient()` uses Lighter's Standard tier — 60 req/min for
+unauthenticated public callers, throttled IP-wide. To bypass the IP-based
+limit and request a higher per-L1-address quota, pass a read-only auth token
+to the alternate constructor:
+
+```cpp
+// Builder tier: 800 req/min on /candles → 75 ms throttle
+// (the second arg defaults to 1000 ms if you omit it)
+RESTClient client{"ro:42:all:1893456000:abc123def...", std::chrono::milliseconds{75}};
+```
+
+The token is just a string sent verbatim as the `Authorization` header.
+It can be obtained two ways — see [Obtaining a read-only token](#obtaining-a-read-only-token)
+below.
+
+Tier → throttle mapping (assuming the default `/candles` weight of 300):
+
+| Tier      | /candles req/min | Suggested `minRequestInterval` |
+|-----------|------------------|--------------------------------|
+| Standard  | 60               | 1000 ms (default, no token)    |
+| Premium   | 80               | 750 ms                         |
+| Plus      | 400              | 150 ms                         |
+| Builder   | 800              | 75 ms                          |
+
+See [Lighter account types](https://apidocs.lighter.xyz/docs/account-types)
+and [rate limits](https://apidocs.lighter.xyz/docs/rate-limits).
+
+#### Obtaining a read-only token
+
+You first need a Lighter account: open https://app.lighter.xyz, connect an
+Ethereum wallet (MetaMask/Rabby) and sign the registration message (gas < $1,
+no deposit required). After registration there are two ways to mint a token:
+
+**A) Web UI (recommended — gives a long-lived token, no Python needed)**
+
+1. Open https://app.lighter.xyz/read-only-tokens/
+2. Click *Create token*, choose `scope=all`, `expiry` up to **10 years**
+3. Sign with the wallet — you get the token in the canonical format
+   `ro:account_index:scope:expiry_unix:nonce_hex`
+4. Pass it as the constructor argument
+
+**B) Python SDK pre-generation (programmatic 8-hour tokens with rotation)**
+
+Lighter's `SignerClient.create_auth_token_with_expiry` is capped at **8 hours**.
+For continuous coverage Lighter publishes an official rotation helper in their
+[`elliottech/lighter-python` repo](https://github.com/elliottech/lighter-python/tree/main/examples/read-only-auth):
+
+```bash
+git clone https://github.com/elliottech/lighter-python.git
+cd lighter-python/examples/read-only-auth
+# edit setup.py: ETH_PRIVATE_KEY, BASE_URL=https://mainnet.zklighter.elliot.ai
+python setup.py config.json          # registers API key index 253 on-chain
+NUM_DAYS=28 python generate.py       # mints 28 days of 8-hour tokens (6-hour overlap)
+```
+
+The output `auth-tokens.json` is a `{account_index: {timestamp: token}}` map;
+your application picks the current one (a cron / systemd timer that refreshes
+every 6 hours is enough). For one-shot bootstrapping the web UI path is much
+simpler.
+
 ### Historical Candlestick Data
 
 ```cpp
@@ -224,12 +286,17 @@ it and they pick up the public headers under `stonky/lighter/`.
 
 ## Notes and Quirks
 
-- **No authentication.** `RESTClient` has a no-arg constructor; all endpoints
-  used here are public market-data routes.
+- **Authentication is optional.** `RESTClient()` (no-arg) talks to the public
+  market-data routes on the Standard tier. The two-arg overload
+  `RESTClient(authToken, minRequestInterval)` attaches a read-only token to
+  unlock per-L1-address rate limits (Premium / Plus / Builder) — see the
+  *Authenticated Client* section above.
 - **API host:** `mainnet.zklighter.elliot.ai`.
 - **AWS WAF on CloudFront.** Lighter fronts the API with AWS WAF; there is no
-  built-in client-side rate limiter, so callers should serialise requests
-  rather than fan out in parallel to avoid WAF challenges.
+  server-advertised retry-after header, so the client serialises outbound
+  requests via an internal mutex sized to `minRequestInterval`. This is safe
+  to call from multiple threads, but aggregate throughput is capped to that
+  interval — fan-out parallelism gains nothing.
 - **Symbol → market_id resolution** is cached for the lifetime of a
   `RESTClient` instance. Pass `marketId` directly to skip the lookup.
 - **Funding-rate JSON shape varies.** Lighter returns the `rate` field as a

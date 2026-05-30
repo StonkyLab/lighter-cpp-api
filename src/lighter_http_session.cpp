@@ -42,7 +42,8 @@ HTTPSession::HTTPSession(const std::string& host) : m_p(std::make_unique<P>()) {
 
 HTTPSession::~HTTPSession() = default;
 
-http::response<http::string_body> HTTPSession::get(const std::string& path, const nlohmann::json& query) const {
+http::response<http::string_body> HTTPSession::get(const std::string& path, const nlohmann::json& query,
+                                                    const std::string& authHeader) const {
     std::string target = path;
     if (!query.is_null() && query.is_object() && !query.empty()) {
         target += "?";
@@ -52,6 +53,9 @@ http::response<http::string_body> HTTPSession::get(const std::string& path, cons
     // Minimal header set (Accept: */*), mirroring a plain curl request. The WAF does not
     // fingerprint these headers in practice; this just keeps the request shape unremarkable.
     req.set(http::field::accept, "*/*");
+    if (!authHeader.empty()) {
+        req.set(http::field::authorization, authHeader);
+    }
     return m_p->request(req);
 }
 
