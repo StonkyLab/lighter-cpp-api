@@ -93,13 +93,14 @@ struct RESTClient::P {
     }
 
     std::vector<Candle> getCandlesBatch(std::int32_t marketId, CandleInterval interval,
-                                         std::int64_t fromSec, std::int64_t toSec) const {
+                                         std::int64_t startSec, std::int64_t endSec,
+                                         std::int64_t countBack) const {
         nlohmann::json q;
         q["market_id"] = marketId;
         q["resolution"] = magic_enum::enum_name(interval);
-        q["start_timestamp"] = fromSec;
-        q["end_timestamp"] = toSec;
-        q["count_back"] = kMaxBarsPerCall;
+        q["start_timestamp"] = startSec;
+        q["end_timestamp"] = endSec;
+        q["count_back"] = countBack;
 
         const auto response = checkTransport(httpSession->get(kCandlesPath, q));
         const auto json = parseEnvelope(response);
@@ -115,13 +116,14 @@ struct RESTClient::P {
         return candles;
     }
 
-    std::vector<FundingRate> getFundingBatch(std::int32_t marketId, std::int64_t fromSec, std::int64_t toSec) const {
+    std::vector<FundingRate> getFundingBatch(std::int32_t marketId, std::int64_t startSec, std::int64_t endSec,
+                                              std::int64_t countBack) const {
         nlohmann::json q;
         q["market_id"] = marketId;
         q["resolution"] = kFundingResolution;
-        q["start_timestamp"] = fromSec;
-        q["end_timestamp"] = toSec;
-        q["count_back"] = kMaxBarsPerCall;
+        q["start_timestamp"] = startSec;
+        q["end_timestamp"] = endSec;
+        q["count_back"] = countBack;
 
         const auto response = checkTransport(httpSession->get(kFundingsPath, q));
         const auto json = parseEnvelope(response);
@@ -166,28 +168,45 @@ std::vector<Candle> RESTClient::getHistoricalPrices(const std::int32_t marketId,
         throw std::runtime_error("Lighter: invalid candle interval");
     }
     const std::int64_t intervalSec = intervalMs / 1000;
-    const std::int64_t windowSec = intervalSec * kMaxBarsPerCall;
+
+    // Lighter /candles follows the TradingView-UDF convention: `count_back` is authoritative
+    // and OVERRIDES `start_timestamp` — the API always returns the last `count_back` candles
+    // ending at `end_timestamp`, ignoring `start_timestamp`. Advancing `start_timestamp`
+    // (the obvious approach) therefore never moves the window: every batch returns the same
+    // most-recent candles, the cursor never advances, and the loop spins forever, flooding
+    // the endpoint until the AWS WAF rate limiter answers HTTP 405. Instead we paginate by
+    // walking `end_timestamp` FORWARD, sizing `count_back` to the window so each batch holds
+    // <= kMaxBarsPerCall candles. windowSec spans (kMaxBarsPerCall - 1) intervals so the
+    // inclusive count_back never exceeds kMaxBarsPerCall.
+    const std::int64_t windowSec = intervalSec * (kMaxBarsPerCall - 1);
 
     std::vector<Candle> retVal;
-    std::int64_t batchFromSec = from / 1000;
     const std::int64_t toSec = to / 1000;
+    std::int64_t cursorSec = from / 1000;
+    std::int64_t lastOpenTime = -1; // ms; dedupe candles that overlap across window boundaries
 
-    while (batchFromSec < toSec) {
-        const std::int64_t batchToSec = std::min(batchFromSec + windowSec, toSec);
-        auto candles = m_p->getCandlesBatch(marketId, interval, batchFromSec, batchToSec);
+    while (cursorSec < toSec) {
+        const std::int64_t batchEndSec = std::min(cursorSec + windowSec, toSec);
+        std::int64_t countBack = (batchEndSec - cursorSec) / intervalSec + 1;
+        if (countBack > kMaxBarsPerCall) countBack = kMaxBarsPerCall;
 
-        if (candles.empty()) break;
+        const auto batch = m_p->getCandlesBatch(marketId, interval, cursorSec, batchEndSec, countBack);
 
-        // Drop the last candle if it is still open (its end would exceed 'to')
-        if (candles.back().openTime + intervalMs > to) {
-            candles.pop_back();
+        std::vector<Candle> kept;
+        for (const auto& c : batch) {
+            if (c.openTime < from) continue;            // count_back may over-fetch before 'from'
+            if (c.openTime + intervalMs > to) continue; // drop still-open / out-of-range tail
+            if (c.openTime <= lastOpenTime) continue;   // already taken in a previous window
+            kept.push_back(c);
+            lastOpenTime = c.openTime;
         }
-        if (candles.empty()) break;
 
-        if (writer) writer(candles);
+        if (!kept.empty()) {
+            if (writer) writer(kept);
+            retVal.insert(retVal.end(), kept.begin(), kept.end());
+        }
 
-        retVal.insert(retVal.end(), candles.begin(), candles.end());
-        batchFromSec = (candles.back().openTime + intervalMs) / 1000;
+        cursorSec = batchEndSec; // strictly increases each iteration -> guaranteed termination
     }
 
     return retVal;
@@ -200,33 +219,43 @@ std::vector<FundingRate> RESTClient::getFundingRates(const std::string& symbol, 
 
 std::vector<FundingRate> RESTClient::getFundingRates(const std::int32_t marketId, const std::int64_t startTime,
                                                       const std::int64_t endTime) const {
-    // Lighter funding is hourly; paginate in 500-event windows just like candles
-    constexpr std::int64_t fundingIntervalMs = 60 * 60 * 1000;
-    constexpr std::int64_t windowMs = fundingIntervalMs * kMaxBarsPerCall;
+    // Lighter funding is hourly. /fundings shares the candle endpoint's UDF quirk: `count_back`
+    // is a *minimum* number of events ending at `end_timestamp`, so a fixed count_back=500 over a
+    // short window over-fetches and returns events from BEFORE `startTime` (e.g. a 24h request
+    // yields the last 500h). We therefore paginate the same way as candles — walk `end_timestamp`
+    // forward, size `count_back` to the window, and filter to [startTime, endTime] — so the
+    // returned set matches the requested range.
+    constexpr std::int64_t fundingIntervalSec = 60 * 60;
+    constexpr std::int64_t windowSec = fundingIntervalSec * (kMaxBarsPerCall - 1);
 
     std::vector<FundingRate> retVal;
-    std::int64_t batchFromMs = startTime;
+    const std::int64_t toSec = endTime / 1000;
+    std::int64_t cursorSec = startTime / 1000;
+    std::int64_t lastTime = -1; // ms; dedupe events that overlap across window boundaries
 
-    while (batchFromMs < endTime) {
-        const std::int64_t batchToMs = std::min(batchFromMs + windowMs, endTime);
-        auto batch = m_p->getFundingBatch(marketId, batchFromMs / 1000, batchToMs / 1000);
+    while (cursorSec < toSec) {
+        const std::int64_t batchEndSec = std::min(cursorSec + windowSec, toSec);
+        std::int64_t countBack = (batchEndSec - cursorSec) / fundingIntervalSec + 1;
+        if (countBack > kMaxBarsPerCall) countBack = kMaxBarsPerCall;
 
-        if (batch.empty()) break;
+        auto batch = m_p->getFundingBatch(marketId, cursorSec, batchEndSec, countBack);
 
-        // Lighter funding timestamps may be in seconds or ms — normalise to ms.
         for (auto& fr : batch) {
+            // Lighter funding timestamps may arrive in seconds — normalise to ms.
             if (fr.fundingTime > 0 && fr.fundingTime < 100000000000LL) {
                 fr.fundingTime *= 1000; // looked like seconds (<~year 5138), convert to ms
             }
         }
 
-        if (batch.back().fundingTime > endTime) {
-            batch.pop_back();
+        for (const auto& fr : batch) {
+            if (fr.fundingTime < startTime) continue;  // count_back may over-fetch before 'from'
+            if (fr.fundingTime > endTime) continue;    // beyond requested range
+            if (fr.fundingTime <= lastTime) continue;  // already taken in a previous window
+            retVal.push_back(fr);
+            lastTime = fr.fundingTime;
         }
-        if (batch.empty()) break;
 
-        retVal.insert(retVal.end(), batch.begin(), batch.end());
-        batchFromMs = batch.back().fundingTime + fundingIntervalMs;
+        cursorSec = batchEndSec; // strictly increases each iteration -> guaranteed termination
     }
     return retVal;
 }

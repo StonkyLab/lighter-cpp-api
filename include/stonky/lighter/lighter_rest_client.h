@@ -34,8 +34,10 @@ public:
      * @param interval Candle interval
      * @param from timestamp in ms, must be smaller than "to"
      * @param to timestamp in ms, must be bigger than "from"
-     * @param writer Optional callback invoked for each downloaded batch
-     * @return vector of Candle structures, chronologically ascending
+     * @param writer Optional callback invoked once per network batch with that batch's
+     *        in-range candles (already filtered/deduped, chronologically ascending)
+     * @return vector of Candle structures, chronologically ascending, with openTime in
+     *         [from, to). A still-forming final candle (openTime + interval > to) is excluded.
      * @throws std::exception when the symbol is unknown or transport fails
      * @see https://apidocs.lighter.xyz/reference/candles
      */
@@ -44,7 +46,8 @@ public:
                                                           const onCandlesDownloaded& writer = {}) const;
 
     /**
-     * Download historical candles by Lighter market_id (e.g. 0 = BTC perp).
+     * Download historical candles by Lighter market_id (e.g. 1 = BTC perp). Same range
+     * semantics as the symbol overload: returned candles have openTime in [from, to).
      */
     [[nodiscard]] std::vector<Candle> getHistoricalPrices(std::int32_t marketId, CandleInterval interval,
                                                           std::int64_t from, std::int64_t to,
@@ -52,6 +55,7 @@ public:
 
     /**
      * Download historical funding rates by symbol. Lighter funding period is 1 hour.
+     * startTime/endTime are in ms; events are filtered to [startTime, endTime].
      * @return vector of FundingRate structures, chronologically ascending
      * @throws std::exception
      * @see https://apidocs.lighter.xyz/reference/fundings
