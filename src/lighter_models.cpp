@@ -42,6 +42,15 @@ void FundingRate::fromJson(const nlohmann::json& json) {
             fundingRate = it->get<double>();
         }
     }
+
+    // Historical /fundings encodes the rate as a positive magnitude + a
+    // separate `direction` string ("long" or "short"). Standard cross-exchange
+    // convention is signed funding (positive = longs pay shorts, negative =
+    // shorts pay longs), so apply the sign from `direction` here. Current
+    // snapshot endpoint has no `direction` field so this is a no-op there.
+    if (direction == "short" && fundingRate > 0.0) {
+        fundingRate = -fundingRate;
+    }
 }
 
 nlohmann::json PerpAsset::toJson() const { throw std::runtime_error("Unimplemented: PerpAsset::toJson()"); }
