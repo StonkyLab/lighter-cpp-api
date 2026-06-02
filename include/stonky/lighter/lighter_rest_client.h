@@ -10,6 +10,7 @@ Copyright (c) 2026 Vitezslav Kot <vitezslav.kot@stonky.cz>, Stonky s.r.o.
 #define INCLUDE_STONKY_LIGHTER_REST_CLIENT_H
 
 #include "stonky/lighter/lighter_models.h"
+#include <chrono>
 #include <functional>
 #include <memory>
 #include <string>
@@ -23,7 +24,27 @@ class RESTClient {
     std::unique_ptr<P> m_p{};
 
 public:
+    /**
+     * Default constructor — unauthenticated Standard tier.
+     * Rate: 60 requests/min (one request every 1000 ms).
+     * @see https://apidocs.lighter.xyz/docs/rate-limits
+     */
     RESTClient();
+
+    /**
+     * Authenticated constructor — uses a Lighter read-only auth token to bypass
+     * IP-based rate limits and request a higher per-L1-address quota.
+     * @param authToken Read-only auth token. Generate via the Lighter Python SDK
+     *        (`SignerClient.create_auth_token_with_expiry`) or the createToken
+     *        REST endpoint; format: `ro:account_index:scope:expiry_unix:nonce_hex`.
+     *        Sent verbatim as the `Authorization` header on every request.
+     * @param minRequestInterval Minimum time between successive HTTP requests,
+     *        sized to the user's tier. Defaults to 75 ms (Builder tier: 800/min
+     *        on /candles). For Plus tier pass 150 ms; for Premium pass 750 ms.
+     *        @see https://apidocs.lighter.xyz/docs/account-types
+     */
+    explicit RESTClient(std::string authToken,
+                        std::chrono::milliseconds minRequestInterval = std::chrono::milliseconds(75));
 
     ~RESTClient();
 

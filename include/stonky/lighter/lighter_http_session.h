@@ -32,8 +32,11 @@ public:
     /**
      * Issue a GET request. The `query` JSON object is flattened into a query string
      * ("key=value&key=value&..."); pass an empty object for no params.
+     * If `authHeader` is non-empty it is sent as the `Authorization` header value
+     * (Lighter expects a read-only auth token formatted as `ro:account:scope:expiry:nonce`).
      */
-    [[nodiscard]] http::response<http::string_body> get(const std::string& path, const nlohmann::json& query) const;
+    [[nodiscard]] http::response<http::string_body> get(const std::string& path, const nlohmann::json& query,
+                                                        const std::string& authHeader = "") const;
 };
 } // namespace stonky::lighter
 
