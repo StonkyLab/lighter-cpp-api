@@ -34,10 +34,16 @@ void FundingRate::fromJson(const nlohmann::json& json) {
     readValue<std::int32_t>(json, "market_id", marketId);
     readValue<std::string>(json, "symbol", symbol);
 
-    // rate is either string (historical) or number (current). Dispatch on type.
+    // Historical /fundings: rate is a percent string (e.g. "0.0009" = 0.09%); divide by 100 to
+    // get the decimal used by Bybit/Binance. Sign comes from `direction`: "short" means shorts
+    // receive (longs pay) → positive; "long" means longs receive (shorts pay) → negative.
+    // Current snapshot /funding-rates: rate is already a signed decimal number; use as-is.
     if (auto it = json.find("rate"); it != json.end() && !it->is_null()) {
         if (it->is_string()) {
-            try { fundingRate = std::stod(it->get<std::string>()); } catch (...) { /* leave default */ }
+            try {
+                fundingRate = std::stod(it->get<std::string>()) / 100.0;
+                if (direction == "long") fundingRate = -fundingRate;
+            } catch (...) { /* leave default */ }
         } else if (it->is_number()) {
             fundingRate = it->get<double>();
         }
