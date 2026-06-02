@@ -102,6 +102,22 @@ public:
      * @see https://apidocs.lighter.xyz/reference/orderbookdetails
      */
     [[nodiscard]] std::vector<PerpAsset> getPerpetualAssets(bool includeDelisted = false) const;
+
+    /**
+     * Get account balance, open positions and asset holdings by account index.
+     * @param accountIndex Lighter account index (integer, visible in the UI).
+     * @param activeOnly When true (default) the API filters out flat (zero-size) positions.
+     * @return AccountBalance with availableBalance, collateral, positions and assets.
+     * @throws std::exception when the account is not found or transport fails.
+     * @see https://apidocs.lighter.xyz/reference/account-1
+     */
+    [[nodiscard]] AccountBalance getBalance(std::int32_t accountIndex, bool activeOnly = true) const;
+
+    /**
+     * Get account balance by L1 (Ethereum) address.
+     * @param l1Address Hex address, e.g. "0xAbCd...".
+     */
+    [[nodiscard]] AccountBalance getBalance(const std::string& l1Address, bool activeOnly = true) const;
 };
 
 } // namespace stonky::lighter

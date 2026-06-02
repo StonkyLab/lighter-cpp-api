@@ -54,6 +54,29 @@ void testCurrentFunding() {
     }
 }
 
+void testBalance() {
+    const auto restClient = std::make_unique<RESTClient>();
+    // Account index 0 is a public Lighter account with assets; safe for unauthenticated probing.
+    const auto bal = restClient->getBalance(0);
+    spdlog::info("Account index={} l1={}", bal.accountIndex, bal.l1Address);
+    spdlog::info("  availableBalance={:.6f}  collateral={:.6f}  totalAssetValue={:.6f}",
+                 bal.availableBalance, bal.collateral, bal.totalAssetValue);
+    spdlog::info("  crossIM={:.6f}  crossMM={:.6f}",
+                 bal.crossInitialMarginRequirement, bal.crossMaintenanceMarginRequirement);
+    spdlog::info("  positions={}", bal.positions.size());
+    for (const auto& p : bal.positions) {
+        spdlog::info("    {} (market_id={}) sign={} qty={} entry={} uPnL={} margin={}",
+                     p.symbol, p.marketId, p.sign, p.quantity,
+                     p.avgEntryPrice, p.unrealizedPnl, p.allocatedMargin);
+    }
+    spdlog::info("  assets={}", bal.assets.size());
+    for (size_t i = 0; i < std::min<size_t>(3, bal.assets.size()); ++i) {
+        const auto& a = bal.assets[i];
+        spdlog::info("    {} (id={}) balance={:.6f} locked={:.6f} margin={:.6f}",
+                     a.symbol, a.assetId, a.balance, a.lockedBalance, a.marginBalance);
+    }
+}
+
 int main() {
     try {
         spdlog::info("--- testCandlesOnly (cold) ---");
@@ -70,6 +93,10 @@ int main() {
 
         spdlog::info("--- testCurrentFunding ---");
         testCurrentFunding();
+        std::this_thread::sleep_for(std::chrono::seconds(2));
+
+        spdlog::info("--- testBalance ---");
+        testBalance();
     } catch (const std::exception& e) {
         const std::string msg = e.what();
         spdlog::error("Exception: {}", msg.size() > 200 ? msg.substr(0, 200) + "..." : msg);

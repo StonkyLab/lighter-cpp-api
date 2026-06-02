@@ -59,6 +59,58 @@ void FundingRate::fromJson(const nlohmann::json& json) {
     }
 }
 
+nlohmann::json Position::toJson() const { throw std::runtime_error("Unimplemented: Position::toJson()"); }
+
+void Position::fromJson(const nlohmann::json& json) {
+    readValue<std::int32_t>(json, "market_id", marketId);
+    readValue<std::string>(json, "symbol", symbol);
+    readValue<int>(json, "sign", sign);
+    quantity       = readStringAsDouble(json, "position");
+    avgEntryPrice  = readStringAsDouble(json, "avg_entry_price");
+    positionValue  = readStringAsDouble(json, "position_value");
+    unrealizedPnl  = readStringAsDouble(json, "unrealized_pnl");
+    realizedPnl    = readStringAsDouble(json, "realized_pnl");
+    liquidationPrice = readStringAsDouble(json, "liquidation_price");
+    allocatedMargin  = readStringAsDouble(json, "allocated_margin");
+}
+
+nlohmann::json AccountAsset::toJson() const { throw std::runtime_error("Unimplemented: AccountAsset::toJson()"); }
+
+void AccountAsset::fromJson(const nlohmann::json& json) {
+    readValue<std::string>(json, "symbol", symbol);
+    readValue<std::int32_t>(json, "asset_id", assetId);
+    balance       = readStringAsDouble(json, "balance");
+    lockedBalance = readStringAsDouble(json, "locked_balance");
+    marginBalance = readStringAsDouble(json, "margin_balance");
+}
+
+nlohmann::json AccountBalance::toJson() const { throw std::runtime_error("Unimplemented: AccountBalance::toJson()"); }
+
+void AccountBalance::fromJson(const nlohmann::json& json) {
+    readValue<std::int32_t>(json, "account_index", accountIndex);
+    readValue<std::string>(json, "l1_address", l1Address);
+    availableBalance              = readStringAsDouble(json, "available_balance");
+    collateral                    = readStringAsDouble(json, "collateral");
+    totalAssetValue               = readStringAsDouble(json, "total_asset_value");
+    crossInitialMarginRequirement = readStringAsDouble(json, "cross_initial_margin_requirement");
+    crossMaintenanceMarginRequirement = readStringAsDouble(json, "cross_maintenance_margin_requirement");
+
+    if (auto it = json.find("positions"); it != json.end() && it->is_array()) {
+        for (const auto& item : *it) {
+            Position pos;
+            pos.fromJson(item);
+            positions.push_back(pos);
+        }
+    }
+    if (auto it = json.find("assets"); it != json.end() && it->is_array()) {
+        for (const auto& item : *it) {
+            AccountAsset asset;
+            asset.fromJson(item);
+            assets.push_back(asset);
+        }
+    }
+}
+
 nlohmann::json PerpAsset::toJson() const { throw std::runtime_error("Unimplemented: PerpAsset::toJson()"); }
 
 void PerpAsset::fromJson(const nlohmann::json& json) {

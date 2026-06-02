@@ -25,6 +25,7 @@ constexpr const char* kFundingsPath = "/api/v1/fundings";
 constexpr const char* kFundingRatesPath = "/api/v1/funding-rates";
 constexpr const char* kOrderBookDetailsPath = "/api/v1/orderBookDetails";
 constexpr const char* kLighterExchangeTag = "lighter";
+constexpr const char* kAccountPath = "/api/v1/account";
 constexpr const char* kFundingResolution = "1h"; // Lighter funding period
 } // namespace
 
@@ -146,6 +147,26 @@ struct RESTClient::P {
             }
         }
         return candles;
+    }
+
+    AccountBalance getAccountBalance(const std::string& byKey, const std::string& byValue,
+                                      bool activeOnly) const {
+        nlohmann::json q;
+        q["by"] = byKey;
+        q["value"] = byValue;
+        if (activeOnly) q["active_only"] = true;
+
+        throttle();
+        const auto response = checkTransport(httpSession->get(kAccountPath, q, authToken));
+        const auto json = parseEnvelope(response);
+
+        auto it = json.find("accounts");
+        if (it == json.end() || !it->is_array() || it->empty()) {
+            throw std::runtime_error(fmt::format("Lighter: no account found for {}={}", byKey, byValue));
+        }
+        AccountBalance balance;
+        balance.fromJson(it->front());
+        return balance;
     }
 
     std::vector<FundingRate> getFundingBatch(std::int32_t marketId, std::int64_t startSec, std::int64_t endSec,
@@ -322,6 +343,14 @@ std::vector<FundingRate> RESTClient::getCurrentFundingRates() const {
         }
     }
     return rates;
+}
+
+AccountBalance RESTClient::getBalance(const std::int32_t accountIndex, const bool activeOnly) const {
+    return m_p->getAccountBalance("index", std::to_string(accountIndex), activeOnly);
+}
+
+AccountBalance RESTClient::getBalance(const std::string& l1Address, const bool activeOnly) const {
+    return m_p->getAccountBalance("l1_address", l1Address, activeOnly);
 }
 
 } // namespace stonky::lighter

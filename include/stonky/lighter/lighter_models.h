@@ -43,6 +43,51 @@ struct FundingRate final : IJson {
     void fromJson(const nlohmann::json& json) override;
 };
 
+struct Position final : IJson {
+    std::int32_t marketId{-1};
+    std::string symbol{};
+    int sign{0};             // 1 = long, -1 = short
+    double quantity{};       // wire: "position"
+    double avgEntryPrice{};
+    double positionValue{};  // notional in USDC
+    double unrealizedPnl{};
+    double realizedPnl{};
+    double liquidationPrice{};
+    double allocatedMargin{};
+
+    [[nodiscard]] nlohmann::json toJson() const override;
+
+    void fromJson(const nlohmann::json& json) override;
+};
+
+struct AccountAsset final : IJson {
+    std::string symbol{};
+    std::int32_t assetId{-1};
+    double balance{};
+    double lockedBalance{};
+    double marginBalance{};
+
+    [[nodiscard]] nlohmann::json toJson() const override;
+
+    void fromJson(const nlohmann::json& json) override;
+};
+
+struct AccountBalance final : IJson {
+    std::int32_t accountIndex{-1};
+    std::string l1Address{};
+    double availableBalance{};              // free USDC for new orders
+    double collateral{};                    // total collateral (including locked)
+    double totalAssetValue{};               // total portfolio value in USDC
+    double crossInitialMarginRequirement{};
+    double crossMaintenanceMarginRequirement{};
+    std::vector<Position> positions{};      // only non-flat when queried with active_only=true
+    std::vector<AccountAsset> assets{};     // spot / collateral holdings
+
+    [[nodiscard]] nlohmann::json toJson() const override;
+
+    void fromJson(const nlohmann::json& json) override;
+};
+
 struct PerpAsset final : IJson {
     std::string symbol{};
     std::int32_t marketId{-1};
