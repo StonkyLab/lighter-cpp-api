@@ -111,6 +111,14 @@ void AccountBalance::fromJson(const nlohmann::json& json) {
     }
 }
 
+nlohmann::json SendTxResult::toJson() const { throw std::runtime_error("Unimplemented: SendTxResult::toJson()"); }
+
+void SendTxResult::fromJson(const nlohmann::json& json) {
+    readValue<int>(json, "code", code);
+    readValue<std::string>(json, "message", message);
+    readValue<std::string>(json, "tx_hash", txHash);
+}
+
 nlohmann::json PerpAsset::toJson() const { throw std::runtime_error("Unimplemented: PerpAsset::toJson()"); }
 
 void PerpAsset::fromJson(const nlohmann::json& json) {

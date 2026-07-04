@@ -27,6 +27,23 @@ constexpr const char* kOrderBookDetailsPath = "/api/v1/orderBookDetails";
 constexpr const char* kLighterExchangeTag = "lighter";
 constexpr const char* kAccountPath = "/api/v1/account";
 constexpr const char* kFundingResolution = "1h"; // Lighter funding period
+constexpr const char* kNextNoncePath = "/api/v1/nextNonce";
+constexpr const char* kSendTxPath = "/api/v1/sendTx";
+
+/// Percent-encode a value for an application/x-www-form-urlencoded body
+/// (RFC 3986 unreserved set kept literal).
+std::string urlEncode(const std::string& s) {
+    std::string out;
+    out.reserve(s.size() * 3);
+    for (const unsigned char c : s) {
+        if (std::isalnum(c) != 0 || c == '-' || c == '_' || c == '.' || c == '~') {
+            out.push_back(static_cast<char>(c));
+        } else {
+            out += fmt::format("%{:02X}", c);
+        }
+    }
+    return out;
+}
 } // namespace
 
 struct RESTClient::P {
@@ -351,6 +368,32 @@ AccountBalance RESTClient::getBalance(const std::int32_t accountIndex, const boo
 
 AccountBalance RESTClient::getBalance(const std::string& l1Address, const bool activeOnly) const {
     return m_p->getAccountBalance("l1_address", l1Address, activeOnly);
+}
+
+std::int64_t RESTClient::getNextNonce(const std::int32_t accountIndex, const int apiKeyIndex) const {
+    m_p->throttle();
+    nlohmann::json query;
+    query["account_index"] = accountIndex;
+    query["api_key_index"] = apiKeyIndex;
+
+    const auto response = m_p->checkTransport(m_p->httpSession->get(kNextNoncePath, query, m_p->authToken));
+    const auto json = m_p->parseEnvelope(response);
+
+    std::int64_t nonce = -1;
+    readValue<std::int64_t>(json, "nonce", nonce);
+    return nonce;
+}
+
+SendTxResult RESTClient::sendTx(const std::uint8_t txType, const std::string& txInfo) const {
+    m_p->throttle();
+    const std::string body = fmt::format("tx_type={}&tx_info={}", static_cast<int>(txType), urlEncode(txInfo));
+
+    const auto response = m_p->checkTransport(m_p->httpSession->postForm(kSendTxPath, body, m_p->authToken));
+    const auto json = m_p->parseEnvelope(response);
+
+    SendTxResult result;
+    result.fromJson(json);
+    return result;
 }
 
 } // namespace stonky::lighter

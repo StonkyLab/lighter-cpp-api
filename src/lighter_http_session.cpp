@@ -59,6 +59,19 @@ http::response<http::string_body> HTTPSession::get(const std::string& path, cons
     return m_p->request(req);
 }
 
+http::response<http::string_body> HTTPSession::postForm(const std::string& path, const std::string& formBody,
+                                                        const std::string& authHeader) const {
+    http::request<http::string_body> req{http::verb::post, path, 11};
+    req.set(http::field::accept, "*/*");
+    req.set(http::field::content_type, "application/x-www-form-urlencoded");
+    if (!authHeader.empty()) {
+        req.set(http::field::authorization, authHeader);
+    }
+    req.body() = formBody;
+    req.prepare_payload();
+    return m_p->request(req);
+}
+
 http::response<http::string_body> HTTPSession::P::request(http::request<http::string_body> req) {
     req.set(http::field::host, uri);
     // Browser-shaped User-Agent, kept only as a cheap precaution against UA-based heuristics.

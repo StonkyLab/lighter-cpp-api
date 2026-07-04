@@ -37,6 +37,14 @@ public:
      */
     [[nodiscard]] http::response<http::string_body> get(const std::string& path, const nlohmann::json& query,
                                                         const std::string& authHeader = "") const;
+
+    /**
+     * Issue a POST request with an `application/x-www-form-urlencoded` body
+     * (Lighter's write endpoints — sendTx — take form params). The caller passes
+     * the already url-encoded body ("k=v&k=v"). authHeader is optional.
+     */
+    [[nodiscard]] http::response<http::string_body> postForm(const std::string& path, const std::string& formBody,
+                                                             const std::string& authHeader = "") const;
 };
 } // namespace stonky::lighter
 

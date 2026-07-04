@@ -51,3 +51,6 @@ VS/x86
 VS/Release
 VS/Debug
 *.vcxproj.user
+
+# Vendored Lighter native signer — required to build the execution gateway
+!third_party/lighter-signer/*.so

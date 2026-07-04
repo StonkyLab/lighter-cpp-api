@@ -118,6 +118,23 @@ public:
      * @param l1Address Hex address, e.g. "0xAbCd...".
      */
     [[nodiscard]] AccountBalance getBalance(const std::string& l1Address, bool activeOnly = true) const;
+
+    /**
+     * Next transaction nonce for (accountIndex, apiKeyIndex). Seed a local
+     * optimistic counter with this and increment per signed tx.
+     * @see https://apidocs.lighter.xyz/reference/nextnonce
+     */
+    [[nodiscard]] std::int64_t getNextNonce(std::int32_t accountIndex, int apiKeyIndex) const;
+
+    /**
+     * Submit a signed transaction produced by LighterSigner. The tx is
+     * self-authenticating (carries the signature) — no auth token required.
+     * @param txType SignedTx::txType   @param txInfo SignedTx::txInfo (JSON)
+     * @return SendTxResult; code == 200 means accepted (txHash set)
+     * @throws std::exception on transport/envelope error
+     * @see https://apidocs.lighter.xyz/reference/sendtx
+     */
+    [[nodiscard]] SendTxResult sendTx(std::uint8_t txType, const std::string& txInfo) const;
 };
 
 } // namespace stonky::lighter

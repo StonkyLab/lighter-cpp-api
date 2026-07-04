@@ -88,6 +88,16 @@ struct AccountBalance final : IJson {
     void fromJson(const nlohmann::json& json) override;
 };
 
+struct SendTxResult final : IJson {
+    int code{};             // 200 = accepted
+    std::string message{};  // error message when code != 200
+    std::string txHash{};   // venue tx hash
+
+    [[nodiscard]] nlohmann::json toJson() const override;
+
+    void fromJson(const nlohmann::json& json) override;
+};
+
 struct PerpAsset final : IJson {
     std::string symbol{};
     std::int32_t marketId{-1};
