@@ -130,11 +130,19 @@ public:
      * Submit a signed transaction produced by LighterSigner. The tx is
      * self-authenticating (carries the signature) — no auth token required.
      * @param txType SignedTx::txType   @param txInfo SignedTx::txInfo (JSON)
-     * @return SendTxResult; code == 200 means accepted (txHash set)
-     * @throws std::exception on transport/envelope error
+     * @return SendTxResult; code == 200 means accepted (txHash set). A venue
+     *         reject is returned as code != 200 + message — NOT thrown — so the
+     *         caller can resync its nonce and classify the reject.
+     * @throws std::exception on transport error or malformed body only
      * @see https://apidocs.lighter.xyz/reference/sendtx
      */
     [[nodiscard]] SendTxResult sendTx(std::uint8_t txType, const std::string& txInfo) const;
+
+    /**
+     * Replace the auth token sent as the Authorization header. Lighter tokens
+     * expire (max 8 h), so a long-running client must re-mint and swap them.
+     */
+    void setAuthToken(std::string authToken) const;
 };
 
 } // namespace stonky::lighter

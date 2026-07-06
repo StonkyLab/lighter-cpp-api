@@ -7,9 +7,11 @@ Copyright (c) 2026 Vitezslav Kot <vitezslav.kot@stonky.cz>, Stonky s.r.o.
 */
 
 #include "stonky/lighter/lighter_http_session.h"
+#include "stonky/lighter/tls_verify.h"
 #include "stonky/utils/json_utils.h"
 #include "nlohmann/json.hpp"
 #include <boost/asio/ssl.hpp>
+#include <boost/asio/ssl/host_name_verification.hpp>
 #include <boost/beast/version.hpp>
 #include <openssl/err.h>
 
@@ -81,10 +83,11 @@ http::response<http::string_body> HTTPSession::P::request(http::request<http::st
             "Chrome/131.0.0.0 Safari/537.36");
 
     ssl::context ctx{ssl::context::sslv23_client};
-    ctx.set_default_verify_paths();
+    enableTlsPeerVerification(ctx);
 
     tcp::resolver resolver{ioc};
     ssl::stream<tcp::socket> stream{ioc, ctx};
+    stream.set_verify_callback(ssl::host_name_verification(uri));
 
     if (!SSL_set_tlsext_host_name(stream.native_handle(), uri.c_str())) {
         boost::system::error_code ec{static_cast<int>(ERR_get_error()), net::error::get_ssl_category()};
@@ -93,6 +96,25 @@ http::response<http::string_body> HTTPSession::P::request(http::request<http::st
 
     auto const results = resolver.resolve(uri, "443");
     net::connect(stream.next_layer(), results.begin(), results.end());
+
+    // Kernel-level send/recv timeouts: this session is fully synchronous, so a
+    // silently dropped connection would otherwise block http::read forever —
+    // and callers (the execution gateway) may hold their tx mutex across this
+    // call, freezing every order op on the venue. 15 s >> normal RTT.
+    {
+        constexpr int TIMEOUT_S = 15;
+        const auto fd = stream.next_layer().native_handle();
+#ifdef _WIN32
+        const DWORD timeoutMs = TIMEOUT_S * 1000;
+        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&timeoutMs), sizeof(timeoutMs));
+        setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, reinterpret_cast<const char*>(&timeoutMs), sizeof(timeoutMs));
+#else
+        const timeval tv{TIMEOUT_S, 0};
+        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+        setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+#endif
+    }
+
     stream.handshake(ssl::stream_base::client);
 
     http::write(stream, req);

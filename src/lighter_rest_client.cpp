@@ -381,6 +381,13 @@ std::int64_t RESTClient::getNextNonce(const std::int32_t accountIndex, const int
 
     std::int64_t nonce = -1;
     readValue<std::int64_t>(json, "nonce", nonce);
+
+    // -1 fed to the signer means "self-fetch", which would silently decouple the
+    // gateway's optimistic counter from the chain — fail loudly instead.
+    if (nonce < 0) {
+        throw std::runtime_error(fmt::format("Lighter nextNonce: no nonce in response: {}", json.dump()));
+    }
+
     return nonce;
 }
 
@@ -388,12 +395,20 @@ SendTxResult RESTClient::sendTx(const std::uint8_t txType, const std::string& tx
     m_p->throttle();
     const std::string body = fmt::format("tx_type={}&tx_info={}", static_cast<int>(txType), urlEncode(txInfo));
 
+    // Deliberately NOT parseEnvelope: a venue reject (envelope code != 200) must
+    // reach the caller as SendTxResult.code so the gateway can resync its nonce
+    // and classify the reject. Throwing is reserved for transport errors and
+    // malformed bodies, where the tx outcome is genuinely unknown.
     const auto response = m_p->checkTransport(m_p->httpSession->postForm(kSendTxPath, body, m_p->authToken));
-    const auto json = m_p->parseEnvelope(response);
+    const auto json = nlohmann::json::parse(response.body());
 
     SendTxResult result;
     result.fromJson(json);
     return result;
+}
+
+void RESTClient::setAuthToken(std::string authToken) const {
+    m_p->authToken = std::move(authToken);
 }
 
 } // namespace stonky::lighter

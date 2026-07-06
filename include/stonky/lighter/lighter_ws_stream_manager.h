@@ -55,8 +55,15 @@ public:
 
     void unsubscribeOrderBook(int marketId) const;
 
-    /// Subscribe the account_all channel — order + trade + position updates.
+    /// Subscribe the account_all channel — positions/balances (NO orders).
     void subscribeAccount(int accountIndex) const;
+
+    /**
+     * Subscribe the account_all_orders channel — the ORDER event stream. Requires
+     * an auth token in the subscribe frame; tokenProvider is invoked at every
+     * (re)subscribe so reconnect replays always carry a fresh token.
+     */
+    void subscribeAccountOrders(int accountIndex, const onAuthTokenProvider &tokenProvider) const;
 
     [[nodiscard]] bool isConnected() const;
 };

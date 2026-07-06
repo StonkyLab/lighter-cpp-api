@@ -38,6 +38,10 @@ void FundingRate::fromJson(const nlohmann::json& json) {
     // get the decimal used by Bybit/Binance. Sign comes from `direction`: "short" means shorts
     // receive (longs pay) → positive; "long" means longs receive (shorts pay) → negative.
     // Current snapshot /funding-rates: rate is already a signed decimal number; use as-is.
+    // Sign convention (cross-exchange standard): positive = longs pay shorts.
+    // "long" direction = longs receive → negative; "short" = shorts receive →
+    // positive (magnitude unchanged). Applied exactly ONCE, in the string branch
+    // — the numeric snapshot rate is already signed.
     if (auto it = json.find("rate"); it != json.end() && !it->is_null()) {
         if (it->is_string()) {
             try {
@@ -47,15 +51,6 @@ void FundingRate::fromJson(const nlohmann::json& json) {
         } else if (it->is_number()) {
             fundingRate = it->get<double>();
         }
-    }
-
-    // Historical /fundings encodes the rate as a positive magnitude + a
-    // separate `direction` string ("long" or "short"). Standard cross-exchange
-    // convention is signed funding (positive = longs pay shorts, negative =
-    // shorts pay longs), so apply the sign from `direction` here. Current
-    // snapshot endpoint has no `direction` field so this is a no-op there.
-    if (direction == "short" && fundingRate > 0.0) {
-        fundingRate = -fundingRate;
     }
 }
 

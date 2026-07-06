@@ -23,6 +23,11 @@ using onLogMessage = std::function<void(LogSeverity, const std::string &)>;
 /// dispatches on the message's "type" and "channel".
 using onDataEvent = std::function<void(const nlohmann::json &)>;
 
+/// Returns the auth token to embed in the subscribe frame for a channel, or ""
+/// for public channels. Called at FLUSH time (initial subscribe AND every
+/// reconnect replay) so an expired token is re-minted, never replayed stale.
+using onAuthTokenProvider = std::function<std::string(const std::string &channel)>;
+
 /**
  * One TLS WebSocket connection to the Lighter stream (wss://<host>/stream).
  *
@@ -67,6 +72,10 @@ public:
 
     /// Unsubscribe a channel previously passed to subscribe(). No-op otherwise.
     void unsubscribe(const std::string &channel) const;
+
+    /// Install the per-channel auth token provider (see onAuthTokenProvider).
+    /// Set before subscribing any auth-required channel.
+    void setAuthTokenProvider(const onAuthTokenProvider &cb) const;
 
     /// True once transport is up and the venue greeting was received.
     [[nodiscard]] bool isConnected() const;

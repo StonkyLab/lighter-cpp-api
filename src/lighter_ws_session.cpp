@@ -9,6 +9,7 @@ Copyright (c) 2026 Vitezslav Kot <vitezslav.kot@stonky.cz>, Stonky s.r.o.
 #include "stonky/lighter/lighter_ws_session.h"
 #include <fmt/format.h>
 #include <boost/asio/post.hpp>
+#include <boost/asio/ssl/host_name_verification.hpp>
 #include <boost/asio/strand.hpp>
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/beast/core.hpp>
@@ -130,7 +131,21 @@ struct WebSocketSession::P {
 
     // ── Subscription bookkeeping ────────────────────────────────────
 
-    static std::string subscribeMsg(const std::string &channel) { return nlohmann::json{{"type", "subscribe"}, {"channel", channel}}.dump(); }
+    onAuthTokenProvider authTokenProvider;
+
+    /// Built per flush, not cached: auth channels get a FRESH token each time so
+    /// a reconnect replay never sends an expired one.
+    [[nodiscard]] std::string subscribeMsg(const std::string &channel) const {
+        nlohmann::json msg{{"type", "subscribe"}, {"channel", channel}};
+
+        if (authTokenProvider) {
+            if (const auto token = authTokenProvider(channel); !token.empty()) {
+                msg["auth"] = token;
+            }
+        }
+
+        return msg.dump();
+    }
 
     static std::string unsubscribeMsg(const std::string &channel) { return nlohmann::json{{"type", "unsubscribe"}, {"channel", channel}}.dump(); }
 
@@ -204,6 +219,9 @@ struct WebSocketSession::P {
         hostHeader = host;
         buffer.consume(buffer.size());
         ws = std::make_shared<WsStream>(strand, ctx);
+        // Bind the verified peer certificate to the expected hostname (the ctx
+        // has verify_peer on; SNI alone authenticates nothing).
+        ws->next_layer().set_verify_callback(boost::asio::ssl::host_name_verification(host));
 
         resolver.async_resolve(host, port, [this, self, gen](const boost::beast::error_code &ec, const boost::asio::ip::tcp::resolver::results_type &results) {
             if (gen != generation) {
@@ -516,6 +534,8 @@ void WebSocketSession::unsubscribe(const std::string &channel) const {
         self->m_p->pump(self);
     });
 }
+
+void WebSocketSession::setAuthTokenProvider(const onAuthTokenProvider &cb) const { m_p->authTokenProvider = cb; }
 
 bool WebSocketSession::isConnected() const { return m_p->connectedFlag.load(); }
 

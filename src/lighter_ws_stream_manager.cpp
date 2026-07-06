@@ -7,6 +7,7 @@ Copyright (c) 2026 Vitezslav Kot <vitezslav.kot@stonky.cz>, Stonky s.r.o.
 */
 
 #include "stonky/lighter/lighter_ws_stream_manager.h"
+#include "stonky/lighter/tls_verify.h"
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/ssl/context.hpp>
 #include <fmt/format.h>
@@ -63,6 +64,7 @@ struct WSStreamManager::P {
     onLogMessage logCB;
     onOrderBookUpdate bookCB;
     onAccountUpdate accountCB;
+    onAuthTokenProvider authTokenProvider;
 
     /// Per-market order book (bids descending, asks ascending) — maintained from
     /// snapshot + deltas on the io thread only, so no lock is needed.
@@ -129,9 +131,23 @@ struct WSStreamManager::P {
             applyLevels(book.asks, *it);
         }
 
+        const double bestBid = book.bids.empty() ? 0.0 : book.bids.begin()->first;
+        const double bestAsk = book.asks.empty() ? 0.0 : book.asks.begin()->first;
+
+        // A crossed local book means a lost/misapplied delta — the consumer's
+        // sanity gate would just silently stall on it, so make it loud and force
+        // a fresh snapshot via resubscribe.
+        if (bestBid > 0.0 && bestAsk > 0.0 && bestBid > bestAsk) {
+            log(LogSeverity::Warning, fmt::format("Lighter WS: crossed local book market {} (bid {} > ask {}), resubscribing", marketId, bestBid, bestAsk));
+            if (session) {
+                const auto channel = fmt::format("order_book/{}", marketId);
+                session->unsubscribe(channel);
+                session->subscribe(channel);
+            }
+            return;
+        }
+
         if (bookCB) {
-            const double bestBid = book.bids.empty() ? 0.0 : book.bids.begin()->first;
-            const double bestAsk = book.asks.empty() ? 0.0 : book.asks.begin()->first;
             bookCB(marketId, bestBid, bestAsk);
         }
     }
@@ -152,7 +168,9 @@ struct WSStreamManager::P {
             if (const auto it = json.find("order_book"); it != json.end() && it->is_object()) {
                 onOrderBookMessage(channelId(channel), *it, type == "subscribed/order_book");
             }
-        } else if (type == "subscribed/account_all" || type == "update/account_all") {
+        } else if (type == "subscribed/account_all_orders" || type == "update/account_all_orders" || type == "subscribed/account_all" || type == "update/account_all") {
+            // account_all_orders carries the order stream (auth channel);
+            // account_all is positions/balances only — forwarded for completeness.
             if (accountCB) {
                 accountCB(json);
             }
@@ -168,7 +186,17 @@ struct WSStreamManager::P {
             return;
         }
 
+        // Configure the SSL context BEFORE the session/io thread exists — a
+        // concurrent set_default_verify_paths during the handshake is a data
+        // race on the shared X509_STORE.
+        enableTlsPeerVerification(ctx);
+
         session = std::make_shared<WebSocketSession>(ioc, ctx, logCB);
+
+        if (authTokenProvider) {
+            session->setAuthTokenProvider(authTokenProvider);
+        }
+
         session->run(host, port, path, [this](const nlohmann::json &json) { onMessage(json); });
 
         if (!running.exchange(true)) {
@@ -216,7 +244,6 @@ void WSStreamManager::setEndpoint(const std::string &host, const std::string &po
 }
 
 void WSStreamManager::start() const {
-    m_p->ctx.set_default_verify_paths();
     m_p->ensureSession();
 }
 
@@ -234,6 +261,17 @@ void WSStreamManager::unsubscribeOrderBook(const int marketId) const {
 void WSStreamManager::subscribeAccount(const int accountIndex) const {
     m_p->ensureSession();
     m_p->session->subscribe(fmt::format("account_all/{}", accountIndex));
+}
+
+void WSStreamManager::subscribeAccountOrders(const int accountIndex, const onAuthTokenProvider &tokenProvider) const {
+    {
+        std::lock_guard lk(m_p->clientLocker);
+        m_p->authTokenProvider = tokenProvider;
+    }
+
+    m_p->ensureSession();
+    m_p->session->setAuthTokenProvider(tokenProvider);
+    m_p->session->subscribe(fmt::format("account_all_orders/{}", accountIndex));
 }
 
 bool WSStreamManager::isConnected() const { return m_p->session && m_p->session->isConnected(); }
