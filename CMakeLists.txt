@@ -59,13 +59,22 @@ endif ()
 # IMPORTED target so CMake links the signer by its full path (the file has no
 # `lib` prefix, so a bare `-l` search cannot find it). The build-tree rpath is
 # set on the consuming executables so the loader finds it at runtime.
-if (NOT TARGET lighter_signer)
+#
+# The signer ships only as a Linux .so (no Windows build), and an IMPORTED SHARED
+# lib on MSVC would require an import .lib that does not exist — CMake fails to
+# generate. So on MSVC the signer is omitted entirely and lighter_signer.cpp
+# compiles throwing stubs; the data downloader never signs orders.
+if (NOT MSVC AND NOT TARGET lighter_signer)
     add_library(lighter_signer SHARED IMPORTED GLOBAL)
     set_target_properties(lighter_signer PROPERTIES IMPORTED_LOCATION ${LIGHTER_SIGNER_LIB})
 endif ()
 
 if (MODULE_MANAGER)
     add_library(lighter_api SHARED ${SOURCES} ${HEADERS})
+    # On Windows a SHARED lib exports nothing without explicit dllexport, so no
+    # import .lib is produced and consumers fail with LNK1104. Auto-export all
+    # symbols (no-op on non-MSVC, where shared libs already export everything).
+    set_target_properties(lighter_api PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
 else ()
     add_library(lighter_api STATIC ${SOURCES} ${HEADERS})
 
@@ -84,8 +93,10 @@ else ()
 endif ()
 
 # PUBLIC so the signer (and its dir for rpath) propagate through the STATIC lib
-# to the final executable.
-target_link_libraries(lighter_api PUBLIC lighter_signer)
+# to the final executable. Omitted on MSVC (see the signer note above).
+if (NOT MSVC)
+    target_link_libraries(lighter_api PUBLIC lighter_signer)
+endif ()
 target_link_libraries(lighter_api PRIVATE spdlog::spdlog_header_only OpenSSL::Crypto OpenSSL::SSL stonky_common nlohmann_json::nlohmann_json)
 
 if (NOT MSVC)
