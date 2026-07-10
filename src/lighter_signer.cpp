@@ -10,43 +10,6 @@ Copyright (c) 2026 Vitezslav Kot <vitezslav.kot@stonky.cz>, Stonky s.r.o.
 #include <fmt/format.h>
 #include <stdexcept>
 
-#ifdef _WIN32
-// ── Windows: native signer unavailable ──────────────────────────────────
-// The signer is a Linux-only Go c-shared library (no Windows build — see
-// CMakeLists.txt, where it is omitted on MSVC), so these entry points are
-// throwing stubs. The data downloader never signs orders; anything that does
-// fails fast and loud instead of silently mis-linking.
-namespace stonky::lighter {
-namespace {
-[[noreturn]] void signerUnavailable(const char *what) {
-    throw std::runtime_error(fmt::format("Lighter signer '{}' is unavailable on Windows (native Go signer is Linux-only)", what));
-}
-} // namespace
-
-ApiKeyPair generateApiKey() { signerUnavailable("generateApiKey"); }
-
-LighterSigner::LighterSigner(const std::string & /*url*/, const std::string & /*apiPrivateKey*/, const int apiKeyIndex, const std::int64_t accountIndex) :
-    m_apiKeyIndex(apiKeyIndex), m_accountIndex(accountIndex), m_chainId(0) {
-    signerUnavailable("LighterSigner");
-}
-
-std::string LighterSigner::checkClient() { signerUnavailable("checkClient"); }
-
-SignedTx LighterSigner::signCreateOrder(int /*marketIndex*/, std::int64_t /*clientOrderIndex*/, std::int64_t /*baseAmount*/, std::uint32_t /*price*/, bool /*isAsk*/, LighterOrderType /*orderType*/,
-                                        LighterTimeInForce /*timeInForce*/, bool /*reduceOnly*/, std::int64_t /*nonce*/, std::uint32_t /*triggerPrice*/, std::int64_t /*orderExpiry*/) {
-    signerUnavailable("signCreateOrder");
-}
-
-SignedTx LighterSigner::signCancelOrder(int /*marketIndex*/, std::int64_t /*orderIndex*/, std::int64_t /*nonce*/) { signerUnavailable("signCancelOrder"); }
-
-SignedTx LighterSigner::signCancelAllOrders(int /*timeInForce*/, std::int64_t /*timeMs*/, std::int64_t /*nonce*/) { signerUnavailable("signCancelAllOrders"); }
-
-std::string LighterSigner::createAuthToken(std::int64_t /*deadlineUnix*/) { signerUnavailable("createAuthToken"); }
-
-} // namespace stonky::lighter
-
-#else // !_WIN32
-
 // ── Native signer C ABI ─────────────────────────────────────────────────
 // Mirrors third_party/lighter-signer/lighter-signer.h (the cgo-generated
 // header). Declared locally so the Go prologue / Go types never leak into
@@ -195,5 +158,3 @@ std::string LighterSigner::createAuthToken(const std::int64_t deadlineUnix) {
 }
 
 } // namespace stonky::lighter
-
-#endif // _WIN32

@@ -44,61 +44,65 @@ set(SOURCES
         src/lighter_ws_session.cpp
         src/lighter_ws_stream_manager.cpp)
 
+option(ENABLE_TESTS "Build lighter_api test executables" OFF)
+
 # Lighter's prebuilt native signer (Go c-shared lib) — orders are zk-rollup L2
 # txs signed by a scheme not reproducible with stdlib crypto, so we link the
-# vendored .so exactly as the reference Python/TS SDKs FFI into it. Exported to
-# the cache so the top-level executable can set its rpath.
-set(LIGHTER_SIGNER_DIR ${CMAKE_CURRENT_SOURCE_DIR}/third_party/lighter-signer CACHE INTERNAL "Lighter native signer dir")
+# vendored .so exactly as the reference Python/TS SDKs FFI into it. It ships only
+# as a Linux .so (no Windows build), so it is wired up only on non-Windows. The
+# data downloader consumes the STATIC lib and never references the signer object,
+# so its link never pulls the .so in.
+if (NOT WIN32)
+    set(LIGHTER_SIGNER_DIR ${CMAKE_CURRENT_SOURCE_DIR}/third_party/lighter-signer CACHE INTERNAL "Lighter native signer dir")
 
-if (CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64")
-    set(LIGHTER_SIGNER_LIB ${LIGHTER_SIGNER_DIR}/lighter-signer-linux-arm64.so CACHE INTERNAL "Lighter native signer lib")
-else ()
-    set(LIGHTER_SIGNER_LIB ${LIGHTER_SIGNER_DIR}/lighter-signer-linux-amd64.so CACHE INTERNAL "Lighter native signer lib")
-endif ()
+    if (CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64")
+        set(LIGHTER_SIGNER_LIB ${LIGHTER_SIGNER_DIR}/lighter-signer-linux-arm64.so CACHE INTERNAL "Lighter native signer lib")
+    else ()
+        set(LIGHTER_SIGNER_LIB ${LIGHTER_SIGNER_DIR}/lighter-signer-linux-amd64.so CACHE INTERNAL "Lighter native signer lib")
+    endif ()
 
-# IMPORTED target so CMake links the signer by its full path (the file has no
-# `lib` prefix, so a bare `-l` search cannot find it). The build-tree rpath is
-# set on the consuming executables so the loader finds it at runtime.
-#
-# The signer ships only as a Linux .so (no Windows build), and an IMPORTED SHARED
-# lib on MSVC would require an import .lib that does not exist — CMake fails to
-# generate. So on MSVC the signer is omitted entirely and lighter_signer.cpp
-# compiles throwing stubs; the data downloader never signs orders.
-if (NOT MSVC AND NOT TARGET lighter_signer)
-    add_library(lighter_signer SHARED IMPORTED GLOBAL)
-    set_target_properties(lighter_signer PROPERTIES IMPORTED_LOCATION ${LIGHTER_SIGNER_LIB})
+    # IMPORTED target so CMake links the signer by its full path (the file has no
+    # `lib` prefix, so a bare `-l` search cannot find it).
+    if (NOT TARGET lighter_signer)
+        add_library(lighter_signer SHARED IMPORTED GLOBAL)
+        set_target_properties(lighter_signer PROPERTIES IMPORTED_LOCATION ${LIGHTER_SIGNER_LIB})
+    endif ()
 endif ()
 
 if (MODULE_MANAGER)
     add_library(lighter_api SHARED ${SOURCES} ${HEADERS})
-    # On Windows a SHARED lib exports nothing without explicit dllexport, so no
-    # import .lib is produced and consumers fail with LNK1104. Auto-export all
-    # symbols (no-op on non-MSVC, where shared libs already export everything).
-    set_target_properties(lighter_api PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
+    # The SHARED module bakes in lighter_signer.cpp; its native symbols come from
+    # the signer .so, so link it here (PRIVATE — resolved inside the module).
+    if (TARGET lighter_signer)
+        target_link_libraries(lighter_api PRIVATE lighter_signer)
+    endif ()
 else ()
     add_library(lighter_api STATIC ${SOURCES} ${HEADERS})
-
-    add_executable(test test/main.cpp)
-    target_link_libraries(test PRIVATE spdlog::spdlog_header_only lighter_api OpenSSL::Crypto)
-    set_target_properties(test PROPERTIES BUILD_RPATH ${LIGHTER_SIGNER_DIR})
-
-    add_executable(lighter_signer_smoke test/signer_smoke.cpp)
-    target_link_libraries(lighter_signer_smoke PRIVATE spdlog::spdlog_header_only lighter_api OpenSSL::Crypto)
-    set_target_properties(lighter_signer_smoke PROPERTIES BUILD_RPATH ${LIGHTER_SIGNER_DIR})
-
-    add_executable(lighter_market_probe test/market_probe.cpp)
-    target_link_libraries(lighter_market_probe PRIVATE spdlog::spdlog_header_only lighter_api OpenSSL::Crypto)
-    set_target_properties(lighter_market_probe PROPERTIES BUILD_RPATH ${LIGHTER_SIGNER_DIR})
-
 endif ()
 
-# PUBLIC so the signer (and its dir for rpath) propagate through the STATIC lib
-# to the final executable. Omitted on MSVC (see the signer note above).
-if (NOT MSVC)
-    target_link_libraries(lighter_api PUBLIC lighter_signer)
-endif ()
 target_link_libraries(lighter_api PRIVATE spdlog::spdlog_header_only OpenSSL::Crypto OpenSSL::SSL stonky_common nlohmann_json::nlohmann_json)
 
 if (NOT MSVC)
     target_link_libraries(lighter_api PRIVATE atomic)
+endif ()
+
+if (ENABLE_TESTS)
+    add_executable(lighter_test test/main.cpp)
+    target_link_libraries(lighter_test PRIVATE spdlog::spdlog_header_only lighter_api OpenSSL::Crypto)
+
+    add_executable(lighter_signer_smoke test/signer_smoke.cpp)
+    target_link_libraries(lighter_signer_smoke PRIVATE spdlog::spdlog_header_only lighter_api OpenSSL::Crypto)
+
+    add_executable(lighter_market_probe test/market_probe.cpp)
+    target_link_libraries(lighter_market_probe PRIVATE spdlog::spdlog_header_only lighter_api OpenSSL::Crypto)
+
+    # The tests link lighter_api STATIC and pull in lighter_signer.cpp, so they
+    # need the native signer .so and its dir on the build-tree rpath.
+    if (TARGET lighter_signer)
+        target_link_libraries(lighter_test PRIVATE lighter_signer)
+        target_link_libraries(lighter_signer_smoke PRIVATE lighter_signer)
+        target_link_libraries(lighter_market_probe PRIVATE lighter_signer)
+        set_target_properties(lighter_test lighter_signer_smoke lighter_market_probe
+                PROPERTIES BUILD_RPATH ${LIGHTER_SIGNER_DIR})
+    endif ()
 endif ()
