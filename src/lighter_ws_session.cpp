@@ -22,9 +22,11 @@ Copyright (c) 2026 Vitezslav Kot <vitezslav.kot@stonky.cz>, Stonky s.r.o.
 #include <list>
 #include <ranges>
 
+#ifndef MAKE_FILELINE
 #define STONKY_STRINGIZE_I(x) #x
 #define STONKY_STRINGIZE(x) STONKY_STRINGIZE_I(x)
 #define MAKE_FILELINE __FILE__ "(" STONKY_STRINGIZE(__LINE__) ")"
+#endif
 
 namespace stonky::lighter {
 static constexpr int PING_INTERVAL_IN_S = 15;
