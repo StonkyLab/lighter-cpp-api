@@ -33,7 +33,8 @@ set(HEADERS
         include/stonky/lighter/lighter_rest_client.h
         include/stonky/lighter/lighter_signer.h
         include/stonky/lighter/lighter_ws_session.h
-        include/stonky/lighter/lighter_ws_stream_manager.h)
+        include/stonky/lighter/lighter_ws_stream_manager.h
+        include/stonky/lighter/lighter_execution_gateway.h)
 
 set(SOURCES
         src/lighter.cpp
@@ -42,7 +43,8 @@ set(SOURCES
         src/lighter_rest_client.cpp
         src/lighter_signer.cpp
         src/lighter_ws_session.cpp
-        src/lighter_ws_stream_manager.cpp)
+        src/lighter_ws_stream_manager.cpp
+        src/lighter_execution_gateway.cpp)
 
 option(ENABLE_TESTS "Build lighter_api test executables" OFF)
 
