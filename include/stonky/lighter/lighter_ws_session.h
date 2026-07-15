@@ -39,8 +39,10 @@ using onAuthTokenProvider = std::function<std::string(const std::string &channel
  * close() stops the loop.
  *
  * Lighter needs no auth — account data is public by account index. Subscriptions
- * are held back until the venue's `{"type":"connected"}` greeting, then flushed;
- * the venue drives keepalive with `{"type":"ping"}`, answered with a JSON pong.
+ * are held back until the venue's `{"type":"connected"}` greeting, then flushed.
+ * Keepalive is CLIENT-driven: zkLighter closes a connection that sends no frame
+ * for 2 minutes, so the session pings (`{"type":"ping"}`) on every ping-timer
+ * tick and also answers a venue ping with a JSON pong.
  */
 class WebSocketSession final : public std::enable_shared_from_this<WebSocketSession> {
     struct P;

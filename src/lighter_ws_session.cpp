@@ -393,6 +393,10 @@ struct WebSocketSession::P {
             return;
         }
 
+        if (type == "pong") {
+            return; // answer to our client keepalive ping — not a data event
+        }
+
         // Data message (subscribed/*, update/*, error, ...) → the consumer.
         if (dataEventCB) {
             try {
@@ -413,6 +417,16 @@ struct WebSocketSession::P {
         if (connected) {
             if (const auto silent = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - lastActivity).count(); silent > ACTIVITY_TIMEOUT_IN_S) {
                 return handleError(self, gen, fmt::format("{}: no activity for {} s", MAKE_FILELINE, silent));
+            }
+
+            // zkLighter requires the CLIENT to send at least one frame every 2
+            // minutes and closes the connection otherwise (live-observed: a
+            // clean server close exactly 120 s after connect, regardless of
+            // inbound traffic). Drive keepalive with an application-level ping
+            // on every timer tick; the venue answers {"type":"pong"}.
+            if (ready) {
+                enqueueOp(nlohmann::json{{"type", "ping"}}.dump());
+                pump(self);
             }
         }
 
