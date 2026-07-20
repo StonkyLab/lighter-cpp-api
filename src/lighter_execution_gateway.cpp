@@ -6,6 +6,7 @@ SPDX-License-Identifier: MIT
 Copyright (c) 2026 Vitezslav Kot <vitezslav.kot@stonky.cz>, Stonky s.r.o.
 */
 
+#include <optional>
 #include "stonky/lighter/lighter_execution_gateway.h"
 #include "stonky/lighter/lighter_rest_client.h"
 #include "stonky/lighter/lighter_signer.h"
@@ -108,6 +109,17 @@ RejectKind classifyReject(const std::string &reason) {
     const auto r = toLower(reason);
     if (r.find("post") != std::string::npos && r.find("only") != std::string::npos) {
         return RejectKind::BenignPostOnlyCross;
+    }
+    /// 23000 "Not enough volume quota" — the account's tx allowance (volume-
+    /// quota program: +1 tx per $2 filled, one free tx per 15 s) is exhausted.
+    /// Retryable after a pause, NOT a dead order path.
+    if (r.find("23000") != std::string::npos || r.find("volume quota") != std::string::npos) {
+        return RejectKind::Throttled;
+    }
+    /// 21706 "invalid order base or quote amount" — the venue can never accept
+    /// this (symbol, sizing) combination; retries within the cycle are futile.
+    if (r.find("21706") != std::string::npos) {
+        return RejectKind::Permanent;
     }
     if (r.find("nonce") != std::string::npos) {
         return RejectKind::Hard; // resynced by the caller
@@ -248,20 +260,58 @@ struct LighterExecutionGateway::P {
         }
     }
 
+    /// A non-2xx HTTP response from the REST layer arrives here as an exception
+    /// whose text embeds Lighter's own {"code","message"} body ("... msg: {...}").
+    /// When that body parses to a venue error code, the reject is DEFINITIVE
+    /// (order never accepted, nonce not consumed) — extract it so the caller can
+    /// throw a structured GatewayError instead of the ambiguous transport path.
+    /// Empty optional = no parseable venue verdict → genuine transport unknown.
+    static std::optional<std::pair<int, std::string>> parseVenueReject(const std::string &text) {
+        const auto marker = text.find("msg: ");
+        if (marker == std::string::npos) {
+            return std::nullopt;
+        }
+        try {
+            const auto json = nlohmann::json::parse(text.substr(marker + 5));
+            const auto code = json.find("code");
+            if (code == json.end() || !code->is_number_integer() || code->get<int>() == 200) {
+                return std::nullopt;
+            }
+            std::string message;
+            if (const auto it = json.find("message"); it != json.end() && it->is_string()) {
+                message = it->get<std::string>();
+            }
+            return std::make_pair(code->get<int>(), std::move(message));
+        } catch (...) {
+            return std::nullopt;
+        }
+    }
+
     /// Submit one signed create/cancel tx under the tx lock; resyncs the nonce on
-    /// EVERY failure and classifies venue rejects into GatewayError. A transport
-    /// error (throw from sendTx) is rethrown plain — the tx outcome is unknown,
-    /// which is exactly the consumer's orphan-handling path.
+    /// EVERY failure and classifies venue rejects into GatewayError — including
+    /// rejects delivered as HTTP 400/429 (their body is a definitive venue
+    /// verdict; treating them as transport-ambiguous made the consumer run its
+    /// orphan/safety-cancel path, and each phantom cancel burned a volume-quota
+    /// free-tx slot — the observed 23000 starvation spiral). A true transport
+    /// error (no parseable venue body) is rethrown plain — the tx outcome is
+    /// unknown, which is exactly the consumer's orphan-handling path.
     void sendSigned(const SignedTx &tx, const char *what) {
         refreshAuthTokenIfNeeded();
 
         SendTxResult result;
         try {
             result = restClient->sendTx(tx.txType, tx.txInfo);
-        } catch (std::exception &) {
-            // Ambiguous: the venue may have accepted the tx and consumed the
-            // nonce — resync so the NEXT op cannot sign with a stale nonce.
+        } catch (std::exception &e) {
+            // Either way the nonce was not (definitive reject) or may have been
+            // (ambiguous transport) consumed — resync so the NEXT op cannot
+            // sign with a stale nonce.
             resyncNonce();
+
+            if (const auto reject = parseVenueReject(e.what())) {
+                const auto reason = fmt::format("{} {}", reject->first, reject->second);
+                throw GatewayError(classifyReject(reason), fmt::format("{}: code {} {}", what, reject->first, reject->second));
+            }
+
             throw;
         }
 
