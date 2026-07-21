@@ -67,6 +67,7 @@ void Position::fromJson(const nlohmann::json& json) {
     realizedPnl    = readStringAsDouble(json, "realized_pnl");
     liquidationPrice = readStringAsDouble(json, "liquidation_price");
     allocatedMargin  = readStringAsDouble(json, "allocated_margin");
+    readValue<int>(json, "margin_mode", marginMode);
 }
 
 nlohmann::json AccountAsset::toJson() const { throw std::runtime_error("Unimplemented: AccountAsset::toJson()"); }

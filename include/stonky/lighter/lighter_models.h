@@ -54,6 +54,7 @@ struct Position final : IJson {
     double realizedPnl{};
     double liquidationPrice{};
     double allocatedMargin{};
+    int marginMode{0};       // wire: "margin_mode" — 0 = cross, 1 = isolated
 
     [[nodiscard]] nlohmann::json toJson() const override;
 
