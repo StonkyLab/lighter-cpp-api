@@ -190,6 +190,10 @@ struct LighterExecutionGateway::P {
     // serialised here and the nonce is resynced from REST after any failure.
     std::mutex txM;
     std::int64_t nextNonce{0};
+    /// Guards the auth-token re-mint so it is safe to drive from BOTH the write
+    /// path (holding txM) and the read path (holding nothing) — see
+    /// refreshAuthTokenIfNeeded. Innermost lock: never acquire another under it.
+    std::mutex authM;
     std::int64_t authTokenDeadline{0}; ///< unix s; re-mint before it passes
 
     void eraseOrderRec(const std::int64_t clientOrderIndex, const std::string &clientOrderId) {
@@ -202,6 +206,12 @@ struct LighterExecutionGateway::P {
     /// start() and again on an unknown-symbol miss, so markets listed after
     /// startup resolve instead of aborting the leg.
     void loadInstruments() {
+        /// The read-path token refresh: refreshInstruments() runs at the top of
+        /// every rebalance (before any read that carries the token), so this is
+        /// the choke point that keeps a stable-book process from letting its
+        /// auth token expire. Cheap and idempotent (no-op until the 1 h margin).
+        refreshAuthTokenIfNeeded();
+
         for (const auto &asset: restClient->getPerpetualAssets(false)) {
             std::lock_guard lk(specM);
             symbolToMarketId[asset.symbol] = asset.marketId;
@@ -241,8 +251,19 @@ struct LighterExecutionGateway::P {
     }
 
     /// Lighter auth tokens live 8 h max; the bot runs for days. Re-mint (local,
-    /// sub-ms, signer-mutex-guarded) with an hour of margin. Caller holds txM.
+    /// sub-ms, signer-mutex-guarded) with an hour of margin.
+    ///
+    /// MUST be driven from the READ path, not only writes: a stable book
+    /// (hysteresis → no order flow) issues no signed tx for hours, so a
+    /// write-only refresh let the token expire and then EVERY read 401'd —
+    /// each rebalance starts with refreshInstruments (a read), which died
+    /// before any write could re-mint (observed 2026-07-21: the bot stopped
+    /// trading for 3 days, "invalid auth: expired token"). Self-locked on authM
+    /// so it is safe to call from any path (write path holds txM; read path
+    /// holds nothing).
     void refreshAuthTokenIfNeeded() {
+        std::lock_guard lk(authM);
+
         const auto now = nowSeconds();
         if (now < authTokenDeadline - 3600) {
             return;
