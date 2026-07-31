@@ -37,6 +37,10 @@ struct FundingRate final : IJson {
     double fundingRate{};
     std::int64_t fundingTime{}; // only set on historical query; 0 on current snapshot
     std::string direction{};    // only set on historical query; empty on current snapshot
+    /// Only set on the current snapshot (/funding-rates), which publishes rows
+    /// for MULTIPLE venues ("lighter", "binance", "bybit", "hyperliquid").
+    /// A consumer that wants LIGHTER's own funding MUST filter on this.
+    std::string exchange{};
 
     [[nodiscard]] nlohmann::json toJson() const override;
 

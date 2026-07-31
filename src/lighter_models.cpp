@@ -33,20 +33,25 @@ void FundingRate::fromJson(const nlohmann::json& json) {
     readValue<std::string>(json, "direction", direction);
     readValue<std::int32_t>(json, "market_id", marketId);
     readValue<std::string>(json, "symbol", symbol);
+    readValue<std::string>(json, "exchange", exchange);
 
-    // Historical /fundings: rate is a percent string (e.g. "0.0009" = 0.09%); divide by 100 to
-    // get the decimal used by Bybit/Binance. Sign comes from `direction`: "short" means shorts
-    // receive (longs pay) → positive; "long" means longs receive (shorts pay) → negative.
-    // Current snapshot /funding-rates: rate is already a signed decimal number; use as-is.
-    // Sign convention (cross-exchange standard): positive = longs pay shorts.
-    // "long" direction = longs receive → negative; "short" = shorts receive →
-    // positive (magnitude unchanged). Applied exactly ONCE, in the string branch
-    // — the numeric snapshot rate is already signed.
+    // Historical /fundings: rate is an UNSIGNED percent string (e.g. "0.0114" = 0.0114%);
+    // divide by 100 for the decimal used by Bybit/Binance, and take the sign from
+    // `direction`, which names the side that PAYS: "long" = longs pay → POSITIVE under the
+    // cross-exchange convention (positive = longs pay shorts); "short" = shorts pay → negative.
+    //
+    // This mapping was inverted until 2026-07-31, which silently sign-flipped every seeded
+    // history. Verified against the venue's own signed snapshot (/funding-rates, "lighter"
+    // rows) on CTR/XLM/TIA/TRUMP — all four disagreed in sign before the fix and agree after.
+    // The snapshot's convention is itself confirmed by its "bybit" rows matching Bybit's own
+    // API sign-for-sign (XLM to the 8th decimal).
+    //
+    // Current snapshot /funding-rates: rate is already a signed decimal; use as-is.
     if (auto it = json.find("rate"); it != json.end() && !it->is_null()) {
         if (it->is_string()) {
             try {
                 fundingRate = std::stod(it->get<std::string>()) / 100.0;
-                if (direction == "long") fundingRate = -fundingRate;
+                if (direction == "short") fundingRate = -fundingRate;
             } catch (...) { /* leave default */ }
         } else if (it->is_number()) {
             fundingRate = it->get<double>();
