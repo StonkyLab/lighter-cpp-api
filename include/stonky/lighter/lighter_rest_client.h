@@ -91,7 +91,16 @@ public:
                                                             std::int64_t endTime) const;
 
     /**
-     * Snapshot of the current funding rate for every market.
+     * Snapshot of the current funding rate for every market, as the HOURLY
+     * settled fraction — i.e. the same units as getFundingRates history.
+     *
+     * The venue endpoint quotes an 8-hour-equivalent rate (CEX display
+     * convention) while Lighter settles hourly at 1/8 of it; this method
+     * divides the quote by 8 so snapshot and history are directly summable.
+     * Verified against the /fundings `value` field (actual settled USDC per
+     * token per hour). Only Lighter's own rows are returned — the endpoint
+     * also publishes binance/bybit/hyperliquid reference rows, which are in
+     * THEIR venues' conventions and are filtered out here.
      * @see https://apidocs.lighter.xyz/reference/funding-rates
      */
     [[nodiscard]] std::vector<FundingRate> getCurrentFundingRates() const;

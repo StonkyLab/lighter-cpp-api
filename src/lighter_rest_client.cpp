@@ -356,6 +356,22 @@ std::vector<FundingRate> RESTClient::getCurrentFundingRates() const {
 
             FundingRate fr;
             fr.fromJson(item);
+
+            // The snapshot quotes an 8-HOUR-EQUIVALENT rate while Lighter settles
+            // hourly at 1/8 of it — convert so this method returns the same
+            // quantity as getFundingRates (settled-per-hour fraction).
+            //
+            // Proof (2026-07-31, against the venue's own settled cashflows): the
+            // /fundings `value` field is the USDC actually settled per 1 token
+            // that hour, and value/price == rate%/100 to 4 significant digits on
+            // every checked market, while this snapshot read exactly 8.000x that
+            // on floor-rate markets (hourly 1.2e-5 vs snapshot 9.6e-5 on
+            // ETH/BTC/SOL/TIA). Both consumers of this method (funding-arb and
+            // dirty-carry) accumulate it as ONE SETTLED EVENT PER HOUR, so
+            // returning the raw quote inflated every accumulated window ~8x
+            // against the correctly-seeded history.
+            fr.fundingRate /= 8.0;
+
             rates.push_back(fr);
         }
     }

@@ -46,7 +46,10 @@ void FundingRate::fromJson(const nlohmann::json& json) {
     // The snapshot's convention is itself confirmed by its "bybit" rows matching Bybit's own
     // API sign-for-sign (XLM to the 8th decimal).
     //
-    // Current snapshot /funding-rates: rate is already a signed decimal; use as-is.
+    // Current snapshot /funding-rates: rate is already a signed decimal — but quoted as an
+    // 8-HOUR-EQUIVALENT rate (Lighter settles hourly at 1/8 of it). The parser keeps the raw
+    // quote; RESTClient::getCurrentFundingRates converts to the hourly settled slice so both
+    // funding methods return the same units.
     if (auto it = json.find("rate"); it != json.end() && !it->is_null()) {
         if (it->is_string()) {
             try {
