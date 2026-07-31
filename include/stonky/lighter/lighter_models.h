@@ -106,6 +106,13 @@ struct SendTxResult final : IJson {
 struct PerpAsset final : IJson {
     std::string symbol{};
     std::int32_t marketId{-1};
+    /// True when the MARKET itself is isolated-margin-only
+    /// (market_config.market_margin_mode == 1) — a venue-side property of 9
+    /// markets as of 2026-07-31 (FOLKS, H100, OPENAI, ...). No account action
+    /// (UI or API) can make such a market cross-margin; a delta-neutral pair
+    /// strategy must exclude these at the universe level, because an isolated
+    /// leg can be liquidated on its own margin while its hedge lives on.
+    bool isolatedOnly{false};
     std::string marketType{};
     std::string status{};
     int sizeDecimals{};

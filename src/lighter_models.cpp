@@ -137,5 +137,11 @@ void PerpAsset::fromJson(const nlohmann::json& json) {
     minBaseAmount = readStringAsDouble(json, "min_base_amount", minBaseAmount);
     minQuoteAmount = readStringAsDouble(json, "min_quote_amount", minQuoteAmount);
     isDelisted = status != "active";
+
+    if (const auto mc = json.find("market_config"); mc != json.end() && mc->is_object()) {
+        int marketMarginMode = 0;
+        readValue<int>(*mc, "market_margin_mode", marketMarginMode);
+        isolatedOnly = marketMarginMode == 1;
+    }
 }
 } // namespace stonky::lighter
