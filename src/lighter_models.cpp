@@ -142,6 +142,7 @@ void PerpAsset::fromJson(const nlohmann::json& json) {
         int marketMarginMode = 0;
         readValue<int>(*mc, "market_margin_mode", marketMarginMode);
         isolatedOnly = marketMarginMode == 1;
+        readValue<bool>(*mc, "force_reduce_only", forceReduceOnly);
     }
 }
 } // namespace stonky::lighter

@@ -121,6 +121,16 @@ RejectKind classifyReject(const std::string &reason) {
     if (r.find("21706") != std::string::npos) {
         return RejectKind::Permanent;
     }
+
+    /// 21740 "invalid reduce only mode" — an OPENING order sent to a market the
+    /// venue has switched to CLOSE-ONLY (force_reduce_only). No retry this cycle
+    /// can succeed; the universe filter excludes such markets, this is the
+    /// belt-and-braces for a flag that flips mid-cycle. Observed live
+    /// 2026-08-03: AAOI, close-only with open interest 0 and +11%/wk funding —
+    /// the textbook "everyone wants out" market.
+    if (r.find("21740") != std::string::npos) {
+        return RejectKind::Permanent;
+    }
     if (r.find("nonce") != std::string::npos) {
         return RejectKind::Hard; // resynced by the caller
     }

@@ -113,6 +113,11 @@ struct PerpAsset final : IJson {
     /// strategy must exclude these at the universe level, because an isolated
     /// leg can be liquidated on its own margin while its hedge lives on.
     bool isolatedOnly{false};
+    /// True when the venue switched the market to CLOSE-ONLY
+    /// (market_config.force_reduce_only): opening orders are rejected with
+    /// 21740. A dynamic state, not a delisting — filter it from tradeable
+    /// universes each refresh instead of persisting a blacklist.
+    bool forceReduceOnly{false};
     std::string marketType{};
     std::string status{};
     int sizeDecimals{};
