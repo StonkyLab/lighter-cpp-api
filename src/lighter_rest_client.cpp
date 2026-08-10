@@ -88,13 +88,18 @@ struct RESTClient::P {
 
     nlohmann::json parseEnvelope(const http::response<http::string_body>& response) const {
         const auto json = nlohmann::json::parse(response.body());
+        if (!json.is_object()) {
+            throw std::runtime_error("Lighter API returned a non-object response envelope");
+        }
         // Lighter wraps every response in {code, message?, ...}. code==200 means OK.
-        if (auto it = json.find("code"); it != json.end() && it->is_number_integer()) {
-            if (it->get<int>() != 200) {
-                std::string msg;
-                readValue<std::string>(json, "message", msg);
-                throw std::runtime_error(fmt::format("Lighter API error, code {}, msg: {}", it->get<int>(), msg));
-            }
+        const auto code = json.find("code");
+        if (code == json.end() || !code->is_number_integer()) {
+            throw std::runtime_error("Lighter API response is missing integer field 'code'");
+        }
+        if (code->get<int>() != 200) {
+            std::string msg;
+            readValue<std::string>(json, "message", msg);
+            throw std::runtime_error(fmt::format("Lighter API error, code {}, msg: {}", code->get<int>(), msg));
         }
         return json;
     }
@@ -155,13 +160,16 @@ struct RESTClient::P {
         const auto response = checkTransport(httpSession->get(kCandlesPath, q, authToken));
         const auto json = parseEnvelope(response);
 
+        const auto candleData = json.find("c");
+        if (candleData == json.end() || !candleData->is_array()) {
+            throw std::runtime_error("Lighter candle response is missing array field 'c'");
+        }
+
         std::vector<Candle> candles;
-        if (auto it = json.find("c"); it != json.end() && it->is_array()) {
-            for (const auto& item : *it) {
-                Candle candle;
-                candle.fromJson(item);
-                candles.push_back(candle);
-            }
+        for (const auto& item : *candleData) {
+            Candle candle;
+            candle.fromJson(item);
+            candles.push_back(candle);
         }
         return candles;
     }
@@ -199,15 +207,18 @@ struct RESTClient::P {
         const auto response = checkTransport(httpSession->get(kFundingsPath, q, authToken));
         const auto json = parseEnvelope(response);
 
+        const auto fundingData = json.find("fundings");
+        if (fundingData == json.end() || !fundingData->is_array()) {
+            throw std::runtime_error("Lighter funding response is missing array field 'fundings'");
+        }
+
         std::vector<FundingRate> rates;
-        if (auto it = json.find("fundings"); it != json.end() && it->is_array()) {
-            for (const auto& item : *it) {
-                FundingRate fr;
-                fr.fromJson(item);
-                // Historical payload has no market_id/symbol; backfill from query context
-                if (fr.marketId < 0) fr.marketId = marketId;
-                rates.push_back(fr);
-            }
+        for (const auto& item : *fundingData) {
+            FundingRate fr;
+            fr.fromJson(item);
+            // Historical payload has no market_id/symbol; backfill from query context
+            if (fr.marketId < 0) fr.marketId = marketId;
+            rates.push_back(fr);
         }
         return rates;
     }
